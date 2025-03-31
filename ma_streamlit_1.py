@@ -139,6 +139,6 @@ if st.button("Auswertung starten"):
     st.download_button(
         label="Ergebnis als Excel herunterladen",
         data=output.getvalue(),
-        file_name="Ausbeuteanalyse_Ergebnis.xlsx",
+        file_name="Monatsausbeute_Ausbeuteanalyse_Ergebnis.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
