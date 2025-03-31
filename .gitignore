@@ -1,0 +1,10 @@
+# Bytecode-Dateien
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtuelle Umgebung (venv)
+venv/
+ENV/
+env/
+.venv/
