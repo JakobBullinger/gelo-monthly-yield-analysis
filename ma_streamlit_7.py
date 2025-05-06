@@ -30,7 +30,6 @@ def main():
         initial_sidebar_state="expanded"
     )
 
-    # --- CSS für kleinere Metrics-Schrift ---
     st.markdown(
         """
         <style>
