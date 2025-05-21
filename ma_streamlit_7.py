@@ -5,14 +5,23 @@ import io
 import numpy as np
 from datetime import datetime
 
-def to_excel(df):
-    """Schreibt ein DataFrame in eine Excel-Datei im Memory."""
+# ――― Hilfsfunktionen ──────────────────────────────────────────────────────
+def fmt_thousands(num: float | int, decimals: int = 0) -> str:
+    """
+    Gibt eine Zahl als String mit Punkt als Tausender-Separator zurück.
+    Beispiel: 23722  →  '23.722'
+    """
+    formatted = f"{num:,.{decimals}f}"        # Standardform: 23,722
+    return formatted.replace(",", ".")         # Ersetzt Komma durch Punkt
+
+def to_excel(df: pd.DataFrame) -> bytes:
+    """Schreibt ein DataFrame in eine Excel-Datei im Memory und gibt die Bytes zurück."""
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=False, sheet_name='Monatsanalyse')
     return output.getvalue()
 
-def get_staerke_klasse(d):
+def get_staerke_klasse(d: float) -> str:
     """Ordnet einen Durchmesser einer Stärkeklasse zu."""
     if d < 100:   return "0"
     if d < 150:   return "1a"
@@ -23,13 +32,15 @@ def get_staerke_klasse(d):
     if d < 400:   return "3b"
     return "unbekannt"
 
-def main():
+# ――― Haupt-App ─────────────────────────────────────────────────────────────
+def main() -> None:
     st.set_page_config(
         page_title="Monatsausbeute Analyse",
         layout="wide",
         initial_sidebar_state="expanded"
     )
 
+    # — CSS: kleinere Schrift in Metrics —
     st.markdown(
         """
         <style>
@@ -40,9 +51,10 @@ def main():
         unsafe_allow_html=True
     )
 
+    # — Sidebar —
     st.sidebar.header("🔧 Einstellungen")
     st.sidebar.markdown(
-        "Lade hier deine Tages‑Excel‑Dateien eines Monats hoch.\n\n"
+        "Lade hier deine Tages-Excel-Dateien eines Monats hoch.\n\n"
         "- Akzeptiert: `.xlsx`, `.xls`\n"
         "- Dateiname muss `Ausbeuteanalyse_YYYY-MM-DD` enthalten."
     )
@@ -52,9 +64,10 @@ def main():
         accept_multiple_files=True
     )
 
+    # — Kopfbereich —
     st.title("📊 Monatsanalyse Ausbeute")
     st.markdown(
-        "Diese App fasst die täglichen Ausbeute‑Reports pro Auftrag und Dimension "
+        "Diese App fasst die täglichen Ausbeute-Reports pro Auftrag und Dimension "
         "über einen oder mehrere Monate zusammen und berechnet zusätzliche Kennzahlen."
     )
 
@@ -62,76 +75,79 @@ def main():
         st.warning("Bitte mindestens eine Excel-Datei hochladen.")
         return
 
-    # — Einlesen aller Dateien
+    # — Einlesen aller Dateien —
     dfs = [pd.read_excel(f) for f in uploaded]
     df_all = pd.concat(dfs, ignore_index=True)
 
-    # — Auftragsnummer & cleanen
+    # — Auftragsnummer & Cleaning —
     df_all['Auftragsnummer'] = df_all['Auftrag'].astype(str).str.extract(r'^(\d{5})')
     df_all['Auftrag_clean'] = df_all['Auftrag'].astype(str).str.extract(
         r'^(\d{5}\s*-\s*(?:[A-Za-zÄÖÜäöü]*\s*)?\d+x\d+(?:x\d+)?)'
     )[0]
 
-    # — Trennen Gesamt- vs. Dimensionszeilen
+    # — Trennen Gesamt- vs. Dimensionszeilen —
     df_overall = df_all[df_all['Stämme'] != 0].copy()
     df_dim     = df_all[df_all['Stämme'] == 0].copy()
 
-    # — Aggregation Gesamt
+    # — Aggregation Gesamt —
     agg_overall = (
         df_overall
-        .groupby(['Auftragsnummer','Auftrag_clean'], as_index=False)
+        .groupby(['Auftragsnummer', 'Auftrag_clean'], as_index=False)
         .agg({
-            'Stämme':'sum',
-            'Volumen_Eingang':'sum',
-            'Durchschn_Stämme':'mean',
-            'Teile':'sum',
-            'Laufzeit_Minuten':'sum'
+            'Stämme': 'sum',
+            'Volumen_Eingang': 'sum',
+            'Durchschn_Stämme': 'mean',
+            'Teile': 'sum',
+            'Laufzeit_Minuten': 'sum'
         })
-        .rename(columns={'Teile':'Teile_gesamt','Auftrag_clean':'Auftrag'})
+        .rename(columns={'Teile': 'Teile_gesamt', 'Auftrag_clean': 'Auftrag'})
     )
     agg_overall['Durchmesser'] = np.sqrt(
         agg_overall['Volumen_Eingang'] /
         (np.pi * agg_overall['Durchschn_Stämme'] * agg_overall['Stämme'])
     ) * 20000
 
-    # — Aggregation Dimensionen
-    dim_cols = ['Teile','Brutto_Volumen','Netto_Volumen','CE','SF','SI','IND','NSI','Q_V','Ausschuss']
+    # — Aggregation Dimensionen —
+    dim_cols = ['Teile', 'Brutto_Volumen', 'Netto_Volumen',
+                'CE', 'SF', 'SI', 'IND', 'NSI', 'Q_V', 'Ausschuss']
     grouped_dim = (
         df_dim
-        .groupby(['Auftragsnummer','Dimension'], as_index=False)[dim_cols]
+        .groupby(['Auftragsnummer', 'Dimension'], as_index=False)[dim_cols]
         .sum()
-        .rename(columns={'Teile':'Teile_dim'})
+        .rename(columns={'Teile': 'Teile_dim'})
     )
 
-    # — Merge & Zusatzkennzahlen
+    # — Merge & Zusatzkennzahlen —
     merged = pd.merge(grouped_dim, agg_overall, on='Auftragsnummer', how='left')
     merged['Brutto_Ausschuss'] = np.where(
-        merged['Brutto_Volumen']>0,
-        merged['Ausschuss']/merged['Brutto_Volumen']*100, 0
+        merged['Brutto_Volumen'] > 0,
+        merged['Ausschuss'] / merged['Brutto_Volumen'] * 100, 0
     )
     merged['Brutto_Ausbeute'] = np.where(
-        merged['Volumen_Eingang']>0,
-        merged['Brutto_Volumen']/merged['Volumen_Eingang']*100, 0
+        merged['Volumen_Eingang'] > 0,
+        merged['Brutto_Volumen'] / merged['Volumen_Eingang'] * 100, 0
     )
     merged['Netto_Ausbeute'] = np.where(
-        merged['Volumen_Eingang']>0,
-        merged['Netto_Volumen']/merged['Volumen_Eingang']*100, 0
+        merged['Volumen_Eingang'] > 0,
+        merged['Netto_Volumen'] / merged['Volumen_Eingang'] * 100, 0
     )
 
-    # — Original‑Layout rekonstruieren
+    # — Original-Layout rekonstruieren —
     final_cols = [
-        'Auftrag','Dimension',
-        'Stämme','Volumen_Eingang','Durchschn_Stämme','Teile_gesamt',
-        'Durchmesser','Stärke_Klasse','Laufzeit_Minuten','Vorschub(FM/h)',
-        'Brutto_Volumen','Brutto_Ausschuss','Netto_Volumen',
-        'Brutto_Ausbeute','Netto_Ausbeute',
-        'CE','SF','SI','IND','NSI','Q_V','Ausschuss'
+        'Auftrag', 'Dimension',
+        'Stämme', 'Volumen_Eingang', 'Durchschn_Stämme', 'Teile_gesamt',
+        'Durchmesser', 'Stärke_Klasse', 'Laufzeit_Minuten', 'Vorschub(FM/h)',
+        'Brutto_Volumen', 'Brutto_Ausschuss', 'Netto_Volumen',
+        'Brutto_Ausbeute', 'Netto_Ausbeute',
+        'CE', 'SF', 'SI', 'IND', 'NSI', 'Q_V', 'Ausschuss'
     ]
-    final_data = []
-    merged.sort_values(['Auftragsnummer','Dimension'], inplace=True)
+    final_data: list[dict] = []
+    merged.sort_values(['Auftragsnummer', 'Dimension'], inplace=True)
 
     for nr in merged['Auftragsnummer'].unique():
-        o = agg_overall.loc[agg_overall['Auftragsnummer']==nr].iloc[0]
+        o = agg_overall.loc[agg_overall['Auftragsnummer'] == nr].iloc[0]
+
+        # Gesamt-Zeile
         row = {
             'Auftrag': o['Auftrag'],
             'Dimension': '',
@@ -142,16 +158,17 @@ def main():
             'Durchmesser': o['Durchmesser'],
             'Stärke_Klasse': get_staerke_klasse(o['Durchmesser']),
             'Laufzeit_Minuten': o['Laufzeit_Minuten'],
-            'Vorschub(FM/h)': (o['Volumen_Eingang']/(o['Laufzeit_Minuten']/60)
+            'Vorschub(FM/h)': (o['Volumen_Eingang'] / (o['Laufzeit_Minuten'] / 60)
                                if o['Laufzeit_Minuten'] else 0)
         }
-        for c in ['Brutto_Volumen','Brutto_Ausschuss','Netto_Volumen',
-                  'Brutto_Ausbeute','Netto_Ausbeute',
-                  'CE','SF','SI','IND','NSI','Q_V','Ausschuss']:
+        for c in ['Brutto_Volumen', 'Brutto_Ausschuss', 'Netto_Volumen',
+                  'Brutto_Ausbeute', 'Netto_Ausbeute',
+                  'CE', 'SF', 'SI', 'IND', 'NSI', 'Q_V', 'Ausschuss']:
             row[c] = 0
         final_data.append(row)
 
-        for _, d in merged[merged['Auftragsnummer']==nr].iterrows():
+        # Dimension-Zeilen
+        for _, d in merged[merged['Auftragsnummer'] == nr].iterrows():
             row_d = {
                 'Auftrag': d['Auftrag'],
                 'Dimension': d['Dimension'],
@@ -176,15 +193,15 @@ def main():
 
     final_df = pd.DataFrame(final_data, columns=final_cols)
 
-    # — Auf drei Nachkommastellen runden
+    # — Runden auf drei Nachkommastellen —
     final_df = final_df.round(3)
 
-    # — Kennzahlen‑Dashboard oben
+    # ――― Kennzahlen-Dashboard ────────────────────────────────────────────
     total_input_volume = final_df['Volumen_Eingang'].sum()
     total_brutto = final_df['Brutto_Volumen'].sum()
 
-    # Datumsspanne und Anzahl Tage aus Dateinamen
-    dates = []
+    # Datumsspanne & Anzahl Tage aus Dateinamen
+    dates: list[datetime.date] = []
     for f in uploaded:
         m = re.search(r'(\d{4}-\d{2}-\d{2})', f.name)
         if m:
@@ -199,13 +216,14 @@ def main():
         filename_range = "unknown"
         num_days = 0
 
+    # — Anzeige der Metriken (mit Punkt als Tausender-Separator) —
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Gesamt Einschnittsvolumen", f"{total_input_volume:,.0f} m³")
-    c2.metric("Gesamt Brutto-Volumen", f"{total_brutto:,.0f} m³")
+    c1.metric("Gesamt Einschnittsvolumen", f"{fmt_thousands(total_input_volume)} m³")
+    c2.metric("Gesamt Brutto-Volumen",    f"{fmt_thousands(total_brutto)} m³")
     c3.metric("Daten von bis", date_range_str)
     c4.metric("Anzahl Tage", f"{num_days}")
 
-    # — Tabelle & Download
+    # ――― Detail-Tabelle & Download ───────────────────────────────────────
     with st.expander("▶️ Detailtabelle anzeigen"):
         st.dataframe(final_df, use_container_width=True)
 
@@ -218,5 +236,6 @@ def main():
         help="Lädt die fertige Monatsauswertung als Excel-Datei."
     )
 
+# ――― App starten ──────────────────────────────────────────────────────────
 if __name__ == "__main__":
     main()
